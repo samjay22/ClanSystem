@@ -1,0 +1,26 @@
+{
+  "name" : "a",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedFirst": {
+      "$path": "src/Client/ReplicatedFirst"
+    },
+
+    "ReplicatedStorage": {
+      "$path": "src/Client/ReplicatedStorage"
+    },
+
+    "ServerScriptService": {
+      "$path": "src/Server/ServerScriptService"
+    },
+
+    "ServerStorage": {
+      "$path": "src/Server/ServerStorage"
+    },
+
+    "StarterGui": {
+      "$path": "src/Client/StarterGui"
+    }
+  }
+}
