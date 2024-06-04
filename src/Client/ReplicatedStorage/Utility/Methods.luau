@@ -12,7 +12,7 @@ return  {
             task.wait(2 ^ 5)
         end
     
-        return result
+        return result, success
     end
     
 }

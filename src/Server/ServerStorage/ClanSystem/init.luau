@@ -11,7 +11,7 @@ local ClanCache : MemoryStoreSortedMap = MemoryStoreService:GetSortedMap("ClanCa
 
 local ClanType = require(game.ReplicatedStorage.Types.Clan)
 local ClanRankData = require(game.ServerStorage.ClanSystem.ClanRanks)
-local Methods = require(game.ServerStorage.Utility.Methods)
+local Methods = require(game.ReplicatedStorage.Utility.Methods)
 
 local ClanSystem = {}
 export type ClanSystem = typeof(ClanSystem)

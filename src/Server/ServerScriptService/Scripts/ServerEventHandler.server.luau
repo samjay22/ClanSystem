@@ -7,7 +7,7 @@ local ClanCache : MemoryStoreSortedMap = MemoryStoreService:GetSortedMap("ClanCa
 
 --Add this server
 local systemHandler = require(game.ServerStorage.DistributedSystemHandler)
-local Methods = require(game.ServerStorage.Utility.Methods)
+local Methods = require(game.ReplicatedStorage.Utility.Methods)
 
 --Treat this server as a distributed system
 systemHandler.AddServer()
