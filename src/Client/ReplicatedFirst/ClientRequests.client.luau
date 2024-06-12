@@ -1,6 +1,6 @@
 --!strict
 local ClientNetwork = require(game.ReplicatedStorage.ClientNetwork)
 
-game.ReplicatedStorage.API.OnClientEvent:Connect(function(responseId : string, ...)
-    ClientNetwork.HandleResponse(responseId, ...)
+game.ReplicatedStorage.API.OnClientEvent:Connect(function(endpoint : string, ...)
+    ClientNetwork.ProcessRequest(endpoint, ...)
 end)

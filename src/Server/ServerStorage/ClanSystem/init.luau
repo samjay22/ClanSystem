@@ -1,4 +1,5 @@
 --!strict
+local Players : Players = game:GetService("Players")
 local DataStoreService : DataStoreService = game:GetService("DataStoreService")
 local MemoryStoreService : MemoryStoreService = game:GetService("MemoryStoreService")
 local HttpService : HttpService = game:GetService("HttpService")
@@ -16,10 +17,39 @@ local Methods = require(game.ReplicatedStorage.Utility.Methods)
 local ClanSystem = {}
 export type ClanSystem = typeof(ClanSystem)
 
+local function UpdateClanEvent(clan)
+    for _, userId in next, clan.Members do
+        local player : Player? = Players:GetPlayerByUserId(userId)
+        if player then
+            --notify the user
+            game.ReplicatedStorage.API:FireClient(player, "UpdateClan", clan)
+        end
+
+        task.wait()
+    end
+end
+
+local function getMemberRankId(clanId : string, userId : number) : number
+    local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
+    
+    for _, rankData in next, clan.RankDataForMembers do
+        if rankData.UserId == userId then
+            return rankData.RankId
+        end
+    end
+
+    return 0
+end
+
 local SafeCall = Methods.SafeCall
-function ClanSystem.CreateClan(name : string, tag : string, description : string, creator : Player, imageId : number?) : ClanType.Clan
+function ClanSystem.CreateClan(name : string, tag : string, description : string, creator : Player, imageId : number) : ClanType.Clan
     local clanId : string = HttpService:GenerateGUID(false)
     local clan : ClanType.Clan = {
+        ClanClosed = false,
+        JoinRequests = {},
+        BannedUsers = {},
+        Image = imageId,
+        ClanTag = tag,
         Id = clanId,
         Name = name,
         Tag = tag,
@@ -68,6 +98,8 @@ function ClanSystem.GetClanById(id : string) : ClanType.Clan
         if cachedClan then
             return cachedClan
         end
+
+        return nil
     end)
 
     --looks like we don't have the clan in cache, let's fetch it from long term storage
@@ -78,9 +110,12 @@ function ClanSystem.GetClanById(id : string) : ClanType.Clan
                 local clan : ClanType.Clan = {
                     Id = id,
                     Name = data.Na,
-                    Tag = data.Ta,
+                    ClanTag = data.Ta,
                     Description = data.De,
                     Owner = data.Ow,
+                    Image = data.Im,
+                    BannedUsers = data.Ba,
+                    JoinRequests = data.Jo,
                     ImageId = data.Im,
                     Members = data.Me,
                     Requests = data.Re,
@@ -89,11 +124,13 @@ function ClanSystem.GetClanById(id : string) : ClanType.Clan
                     UpdatedAt = data.Up,
                     ClanClosed = data.Cl,
                     LimitTOMembers = data.Li,
-                    RankDataForMembers = data.Ra
+                    RankDataForMembers = data.Ra,
                 }
 
-                return clan
+                data = clan
             end
+
+            return data
         end)
 
         --store the clan in cache
@@ -124,7 +161,7 @@ end
 local function RankNameToId(rankName : string) : number
     local foundRankId : number? = nil
     for _, rank in ipairs(ClanRankData) do
-        if rank.name == rankName then
+        if rank.Name == rankName then
             foundRankId = rank.Id
             break
         end
@@ -133,19 +170,44 @@ local function RankNameToId(rankName : string) : number
     return foundRankId or error("Rank not found")
 end
 
-function ClanSystem.PromoteUser(clanId : string, requestedUserId : number, userToRankId : number, newRole : string)
+function ClanSystem.BanUser(clanId : string, requestedUserId : number, userToBanId : number)
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
-    --can they rank?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[userToRankId].RankId)
-    if table.find(userRole.Permissions, "Promote") then
-        clan.RankDataForMembers[requestedUserId].RankId = RankNameToId(newRole)
+    --can they ban?
+    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId) :: ClanType.ClanRank
+    if table.find(userRole.Permissions, "Ban") then
+        table.insert(clan.BannedUsers, userToBanId)
+        table.remove(clan.Members, table.find(clan.Members, userToBanId))
     end
 
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
+    end)
+end
+
+function ClanSystem.PromoteUser(clanId : string, requestedUserId : number, userToRankId : number)
+    local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
+
+    --can they rank?
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
+    if table.find(userRole.Permissions, "Promote") then
+        local rankId : number = getMemberRankId(clanId, userToRankId)
+
+        --if they are already the highest rank, don't do anything
+        for _, rankData in next, clan.RankDataForMembers do
+            if rankData.UserId == userToRankId then
+                rankData.RankId = rankId - 1 > 0 and rankId - 1 or 1
+                break
+            end
+        end
+    end
+
+    SafeCall(function()
+        ClanCache:UpdateAsync(clanId, function(oldData)
+            return clan
+        end, 24 * 60 * 60)
     end)
 end
 
@@ -153,15 +215,23 @@ function ClanSystem.DemoteUser(clanId : string, requestedUserId : number, userTo
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they rank?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[userToRankId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "Demote") then
-        clan.RankDataForMembers[requestedUserId].RankId = RankNameToId(newRole)
+        local rankId : number = getMemberRankId(clanId, userToRankId)
+
+        --if they are already the highest rank, don't do anything
+        for _, rankData in next, clan.RankDataForMembers do
+            if rankData.UserId == userToRankId then
+                rankData.RankId = rankId - 1 > 0 and rankId - 1 or 1
+                break
+            end
+        end
     end
 
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
     end)
 end
 
@@ -169,15 +239,21 @@ function ClanSystem.RankUser(clanId : string, requestedUserId : number, userToRa
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they rank?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[userToRankId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "ChangeRank") then
-        clan.RankDataForMembers[requestedUserId].RankId = RankNameToId(newRole)
+        --if they are already the highest rank, don't do anything
+        for _, rankData in next, clan.RankDataForMembers do
+            if rankData.UserId == userToRankId then
+                rankData.RankId = RankNameToId(newRole)
+                break
+            end
+        end
     end
 
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 60 * 60 * 24)
     end)
 end
 
@@ -185,15 +261,15 @@ function ClanSystem.ChangeTag(clanId : string, requestedUserId : number, newTag 
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they change tag?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "ChangeTag") then
-        clan.Tag = newTag
+        clan.ClanTag = newTag
     end
 
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
     end)
 end
 
@@ -201,7 +277,7 @@ function ClanSystem.ChangeDescription(clanId : string, requestedUserId : number,
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they change description?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "ChangeDescription") then
         clan.Description = newDescription
     end
@@ -209,7 +285,7 @@ function ClanSystem.ChangeDescription(clanId : string, requestedUserId : number,
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
     end)
 end
 
@@ -217,15 +293,14 @@ function ClanSystem.ChangeImage(clanId : string, requestedUserId : number, newIm
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they change image?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "ChangeImage") then
-        clan.ImageId = newImageId
+        clan.Image = newImageId
     end
-
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
     end)
 end
 
@@ -233,7 +308,7 @@ function ClanSystem.ChangeLimit(clanId : string, requestedUserId : number, newLi
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they change limit?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "ChangeLimit") then
         clan.LimitTOMembers = #clan.Members > newLimit and newLimit > 3 and newLimit or clan.LimitTOMembers
     end
@@ -241,7 +316,7 @@ function ClanSystem.ChangeLimit(clanId : string, requestedUserId : number, newLi
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
     end)
 end
 
@@ -249,17 +324,41 @@ function ClanSystem.CloseClan(clanId : string, requestedUserId : number)
     local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
 
     --can they close clan?
-    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId)
+    local userRole : ClanType.ClanRank = RankIdToRank(getMemberRankId(clanId, requestedUserId)) :: ClanType.ClanRank
     if table.find(userRole.Permissions, "CloseClan") then
-        clan.Closed = true
+        clan.ClanClosed = true
     end
 
     SafeCall(function()
         ClanCache:UpdateAsync(clanId, function(oldData)
             return clan
-        end)
+        end, 24 * 60 * 60)
     end)
-    
+
+    ClanStore:UpdateAsync(clanId, function(oldData)
+        return nil
+    end)
+end
+
+function ClanSystem.AdmitUser(clanId : string, requestedUserId : number)
+    local clan : ClanType.Clan = ClanSystem.GetClanById(clanId)
+
+    --can they admit?
+    local userRole : ClanType.ClanRank = RankIdToRank(clan.RankDataForMembers[requestedUserId].RankId) :: ClanType.ClanRank
+    if table.find(userRole.Permissions, "Admit") then
+        table.insert(clan.Members, requestedUserId)
+        table.remove(clan.JoinRequests, table.find(clan.JoinRequests, requestedUserId))
+
+        table.insert(clan.RankDataForMembers, {UserId = requestedUserId, RankId = 4})
+
+        UpdateClanEvent(clan)
+
+        SafeCall(function()
+            ClanCache:UpdateAsync(clanId, function(oldData)
+                return clan
+            end, 24 * 60 * 60)
+        end)
+    end
 end
 
 return ClanSystem

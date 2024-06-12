@@ -16,7 +16,9 @@ return {
             "ChangeImage",
             "ChangeLimit",
             "ChangeRankOrder",
-            "ChangeRankName"
+            "ChangeRankName",
+            "Ban",
+            "Admit",
         },
     },
 
@@ -34,7 +36,9 @@ return {
             "ChangeImage",
             "ChangeLimit",
             "ChangeRankOrder",
-            "ChangeRankName"
+            "ChangeRankName",
+            "Ban",
+            "Admit",
         },
     },
 

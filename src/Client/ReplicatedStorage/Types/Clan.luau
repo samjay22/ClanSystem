@@ -15,6 +15,7 @@ export type ClanRankData = {
 export type Clan = {
     Id: string,
     Name: string,
+    ClanTag : string,
     Image : number, -- group id
     Description: string,
     Owner: number,
